@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8"><title>sweep</title><body style="background:#222;color:#eee;font:12px monospace"><pre id="out">running…</pre><script>
+const pages=location.search.slice(1).split(",").filter(Boolean), W=+(new URLSearchParams(location.hash.slice(1)).get("w")||390);
+const out=document.getElementById("out"), res=[];
+const wait=(ms)=>new Promise(r=>setTimeout(r,ms));
+(async()=>{for(const p of pages){const f=document.createElement("iframe");f.style.cssText=`width:${W}px;height:800px;border:0;background:#000`;document.body.appendChild(f);f.src="/"+p;await new Promise(r=>f.onload=r);await wait(2600);
+ const d=f.contentDocument,w=f.contentWindow,root=d.documentElement;const iss=[];
+ d.querySelectorAll("img").forEach(i=>{w.scrollTo(0,0);});
+ // force lazy images to load by scrolling through
+ const H=root.scrollHeight;for(let y=0;y<H;y+=600){w.scrollTo(0,y);await wait(60);} await wait(700);w.scrollTo(0,0);
+ if(root.scrollWidth>W+1)iss.push("h-overflow "+root.scrollWidth+">"+W);
+ const off=[...d.body.querySelectorAll("*")].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.right>W+2&&getComputedStyle(e).position!=="fixed"&&!e.closest(".mnav,.reel,.cats,[hidden],.lightbox,.slides,.sr")}).slice(0,3).map(e=>e.tagName+"."+String(e.className).slice(0,24)+"→"+Math.round(e.getBoundingClientRect().right));
+ if(off.length)iss.push("beyond:"+off.join(" "));
+ const bad=[...d.images].filter(i=>i.complete&&i.naturalWidth===0&&i.src&&!i.src.startsWith("data:")).map(i=>i.src.slice(-40));if(bad.length)iss.push("broken:"+bad.join(","));
+ const big=[...d.images].filter(i=>i.naturalWidth>1&&i.clientWidth>0&&i.naturalWidth>i.clientWidth*2.6&&!i.src.startsWith("data:")).map(i=>i.naturalWidth+"px→"+i.clientWidth+" "+i.src.slice(-30));if(big.length)iss.push("oversize:"+big.slice(0,2).join(";"));
+ const tiny=[...d.querySelectorAll("a,button")].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&(r.height<30)&&!e.closest(".foot,.cats,nav,.crumbs")&&e.textContent.trim().length>0&&r.width>20}).length;
+ const txt=d.body.innerText;if(/undefined|NaN|\[object|\{\{/.test(txt))iss.push("bad-text");
+ if(/Harbour|harbourandvine|Three rooms|quay|Nine-hour|Lorem/i.test(txt))iss.push("demo-text:"+(txt.match(/Harbour|harbourandvine|Three rooms|quay|Nine-hour|Lorem/i)||[])[0]);
+ res.push(p+" w"+W+": "+(iss.join(" | ")||"ok")+(tiny>6?" | small-targets:"+tiny:""));f.remove();out.textContent=res.join("\n");}
+ out.textContent="DONE\n"+res.join("\n");document.title="DONE";})();
+</script>
