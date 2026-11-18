@@ -1,10 +1,11 @@
-/* Hero slideshow: a black ink drop bleeds across the picture and the next one appears behind it.
+/* Hero slideshow: ink floods across the picture from the top right to the bottom left, and the next one appears behind it.
    WebGL (a noise-warped spreading front with an ink-dark fringe). Without WebGL, or with reduced motion, the plain CSS cross-fade stays. */
 (() => {
   "use strict";
   const slides = document.querySelector(".hero .slides");
   if (!slides || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const HOLD = 6200, BLEED = 2300;          // ms: time on a picture, time the ink takes to cross it
+  const HOLD = 5200, BLEED = 4200;          // ms: time on a picture, time the ink takes to cross it
+  const INK = [.737, .235, .078];            // the ink colour: the logo orange. For a white ink use [.95, .92, .88]
 
   const wait = () => new Promise((ok) => {
     const t0 = Date.now(), tick = () => {
@@ -15,26 +16,25 @@
 
   const VERT = "attribute vec2 p;varying vec2 v;void main(){v=p*.5+.5;gl_Position=vec4(p,0.,1.);}";
   const FRAG = `precision highp float;varying vec2 v;
-uniform sampler2D A,B;uniform vec2 sa,sb;uniform float t,za,zb,aspect,maxd,seed;uniform vec2 origin;
+uniform sampler2D A,B;uniform vec2 sa,sb,origin;uniform vec3 ink;uniform float t,za,zb,aspect,maxd,seed;
 float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
 float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x),f.y);}
-float fbm(vec2 p){float s=0.,a=.5;for(int i=0;i<5;i++){s+=a*noise(p);p=p*2.03+17.1;a*=.5;}return s;}
+float fbm(vec2 p){float s=0.,a=.5;for(int i=0;i<6;i++){s+=a*noise(p);p=p*2.03+17.1;a*=.5;}return s;}
 vec3 tex(sampler2D T,vec2 s,float z){return texture2D(T,(v-.5)*s/z+.5).rgb;}
 void main(){
   vec2 p=vec2(v.x*aspect,v.y);
-  float d=distance(p,origin*vec2(aspect,1.))/maxd;
-  float n=fbm(p*2.2+seed)*.8+fbm(p*6.5-seed)*.2;
-  float field=d+(n-.5)*.5;
-  float front=mix(-.42,1.4,t);
-  float k=front-field;                                   /* > 0: the ink has been here */
+  /* domain warping gives the flowing, marbled tendrils of ink in water */
+  vec2 w=vec2(fbm(p*1.5+seed),fbm(p*1.5+seed+9.2));
+  vec2 q=p+(w-.5)*.7;
+  float streak=fbm(q*4.2+w*2.5);
+  float field=distance(q,origin*vec2(aspect,1.))/maxd+(streak-.5)*.5;
+  float front=mix(-.4,1.6,t);
+  float k=front-field;                                  /* > 0: the ink has reached here */
+  float bw=.09+.2*noise(q*6.5+seed);                    /* how far the ink runs ahead of the new picture */
   vec3 a=tex(A,sa,za),b=tex(B,sb,zb);
-  vec3 col=mix(a,b,smoothstep(0.,.035,k));              /* the new picture shows behind the ink */
-  float w=.27*(.5+1.0*noise(p*8.+seed));                 /* ragged fringe */
-  float run=smoothstep(0.,.1,t)*(1.-smoothstep(.9,1.,t));
-  float band=pow(smoothstep(w,0.,k),.7)*smoothstep(-.03,.03,k);  /* dark band just inside the front */
-  float halo=exp(-max(-k,0.)*11.)*.85*step(k,0.);        /* soft bleed just ahead of it */
-  float ink=clamp(band+halo,0.,1.)*run;
-  col=mix(col,vec3(.015,.014,.018),ink*.97);
+  vec3 c=ink*(.93+.07*streak);                          /* a little marbling inside the ink */
+  vec3 col=mix(a,c,smoothstep(0.,.012,k));              /* ink over the old picture, crisp edge */
+  col=mix(col,b,smoothstep(bw,bw+.014,k));              /* the new picture shows behind it */
   gl_FragColor=vec4(col,1.);
 }`;
 
@@ -58,7 +58,7 @@ void main(){
 
   /* object-fit: cover: how much of the picture's width and height is visible */
   const cover = (im, cw, ch) => { const ia = im.naturalWidth / im.naturalHeight, ca = cw / ch; return ia > ca ? [ca / ia, 1] : [1, ia / ca]; };
-  const ease = (x) => (x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+  const ease = (x) => -(Math.cos(Math.PI * x) - 1) / 2;
 
   wait().then((imgs) => {
     if (!imgs) return;
@@ -69,9 +69,8 @@ void main(){
     const size = () => { const b = slides.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 1.5), s = Math.min(1, 1600 / Math.max(1, b.width * dpr)); cw = Math.max(2, Math.round(b.width * dpr * s)); ch = Math.max(2, Math.round(b.height * dpr * s)); if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; gl.viewport(0, 0, cw, ch); } };
     new ResizeObserver(size).observe(slides); size();
 
-    let cur = 0, nxt = 1, t0 = performance.now(), bleeding = false, origin = [.5, .5], seed = 1, age = 0, visible = true;
-    const corners = [[0.08, 0.1], [0.92, 0.12], [0.1, 0.9], [0.9, 0.88], [0.5, 0.05], [0.04, 0.5], [0.96, 0.55]];
-    const draw = (now) => {
+    let cur = 0, nxt = 1, t0 = performance.now(), bleeding = false, origin = [1.04, 1.04], seed = 1, age = 0, visible = true;
+        const draw = (now) => {
       const sinceBleed = bleeding ? now - t0 : 0, p = bleeding ? Math.min(1, sinceBleed / BLEED) : 0, e = ease(p);
       const zoom = (a) => 1.10 - .10 * ease(Math.min(1, a / (HOLD + BLEED)));            /* slow settle, like the old zoom */
       const aA = bleeding ? HOLD + sinceBleed : now - t0, aB = bleeding ? sinceBleed : 0;
@@ -80,9 +79,9 @@ void main(){
       gl.uniform2f(u("sa"), sa[0], sa[1]); gl.uniform2f(u("sb"), sb[0], sb[1]);
       gl.uniform1f(u("t"), e); gl.uniform1f(u("za"), zoom(aA)); gl.uniform1f(u("zb"), zoom(aB)); gl.uniform1f(u("aspect"), asp);
       gl.uniform1f(u("maxd"), Math.max(Math.hypot(ox, oy), Math.hypot(asp - ox, oy), Math.hypot(ox, 1 - oy), Math.hypot(asp - ox, 1 - oy)));
-      gl.uniform1f(u("seed"), seed); gl.uniform2f(u("origin"), origin[0], origin[1]);
+      gl.uniform1f(u("seed"), seed); gl.uniform2f(u("origin"), origin[0], origin[1]); gl.uniform3f(u("ink"), INK[0], INK[1], INK[2]);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      if (!bleeding && now - t0 >= HOLD) { bleeding = true; t0 = now; origin = corners[Math.floor(Math.random() * corners.length)]; seed = Math.random() * 40; }
+      if (!bleeding && now - t0 >= HOLD) { bleeding = true; t0 = now; seed = Math.random() * 40; }
       else if (bleeding && p >= 1) { cur = nxt; nxt = (nxt + 1) % imgs.length; bleeding = false; t0 = now - BLEED; }
     };
     /* run only while the hero is on screen and the tab is visible */
@@ -94,7 +93,7 @@ void main(){
     document.addEventListener("visibilitychange", () => (document.hidden ? stop() : kick()));
     draw(performance.now());
     cv.style.opacity = "1"; slides.classList.add("ink-on"); setTimeout(() => slides.querySelectorAll("figure").forEach((f) => (f.style.display = "none")), 700);
-    window.HVink = { seek(p) { frozen = true; visible = false; stop(); bleeding = true; origin = [.12, .14]; seed = 7; t0 = performance.now() - p * BLEED; draw(performance.now()); } };  /* for checking a single frame */
+    window.HVink = { seek(p) { frozen = true; visible = false; stop(); bleeding = true; seed = 7; t0 = performance.now() - p * BLEED; draw(performance.now()); } };  /* for checking a single frame */
     kick();
   });
 })();
